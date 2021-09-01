@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="utf-8">
+		<title>links</title>
+	</head>
+	<body>
+		<h1>{{user.name}}'s links</h1>
+		<p>upload links</p>
+		{{ #if editor }}
+		<details>
+			<summary>add links</summary>
+			<form action="/api/users/self/links" method="post">
+				<label>links:</label>
+				</br>
+				<textarea name="links" cols=80 rows=20 wrap="soft"></textarea>
+				</br>
+				<input type="submit">
+			</form>
+		</details>
+		{{ /if }}
+
+		<table>
+		{{ #each links }}
+			<tr>
+				<td>{{ this.url }}</td>
+				<td>{{ this.created }}</td>
+			</tr>
+		{{ /each }}
+		</table>
+
+	</body>
+</html>
