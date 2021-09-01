@@ -1,6 +1,5 @@
-use tokio::sync::Mutex;
-
 use quick_from::QuickFrom;
+use tokio::sync::Mutex;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -44,4 +43,3 @@ impl ErrorCell {
         self.0.lock().await.take()
     }
 }
-

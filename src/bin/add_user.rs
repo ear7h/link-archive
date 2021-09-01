@@ -14,5 +14,4 @@ async fn main() {
     let password_enc = crypto::encode_password(password.as_bytes()).unwrap();
 
     db.insert_user(&name, &password_enc).await.unwrap();
-
 }

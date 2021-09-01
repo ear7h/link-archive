@@ -6,9 +6,9 @@
 mod error;
 pub use error::*;
 
+pub mod api;
+pub mod crypto;
 pub mod database;
 pub mod models;
-pub mod crypto;
-pub mod api;
-pub mod ui;
 crate mod time_utils;
+pub mod ui;
