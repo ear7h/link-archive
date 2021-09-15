@@ -1,5 +1,5 @@
 use quick_from::QuickFrom;
-use tokio::sync::Mutex;
+use http_mux::mux::MuxError;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -13,6 +13,7 @@ pub enum Error {
     UserIdNotFound(u32),
     FailedLogin,
     Unauthorized,
+    BadRequest,
 
     #[quick_from]
     Sqlite(rusqlite::Error),
@@ -26,20 +27,20 @@ pub enum Error {
     #[quick_from]
     Jwt(jsonwebtoken::errors::ErrorKind),
 
+    #[quick_from]
+    Hyper(hyper::Error),
+
     RouteNotFound,
     Internal,
 }
 
-/// RejectError lets us take an owned cell from a Rejection
-#[derive(Debug)]
-pub struct ErrorCell(Mutex<Option<Error>>);
-
-impl ErrorCell {
-    pub fn new(err : Error) -> Self {
-        Self(Mutex::new(Some(err)))
-    }
-
-    pub async fn take(&self) -> Option<Error> {
-        self.0.lock().await.take()
+impl From<MuxError> for Error {
+    fn from(err : MuxError) -> Self {
+        use MuxError::*;
+        match err {
+            NotFound(_) | MethodNotAllowed(_, _) => Error::RouteNotFound,
+            Parse(_, _) => Error::BadRequest,
+        }
     }
 }
+

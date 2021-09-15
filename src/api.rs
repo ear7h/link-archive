@@ -1,22 +1,24 @@
-use std::convert::Infallible;
-use std::str::FromStr;
+use std::net::SocketAddr;
 use std::sync::Arc;
+use std::str::FromStr;
 
-use cookie::{Cookie, SameSite};
-use http::{header, StatusCode};
 use serde::Deserialize;
-use warp::filters::method;
-use warp::reject::Reject;
-use warp::reply::{self, Response};
-use warp::{filters, Filter, Rejection, Reply};
+use plumb::{Pipe, PipeExt};
+use plumb::tuple_utils::{Append, Prepend, Pluck};
+use hyper::Body;
+use hyper::body::Buf;
+use http::{header, StatusCode};
+use http_mux::{route, mux};
+use cookie::Cookie;
 
-use crate::error::{Error, ErrorCell};
-use crate::{crypto, database, models, ui};
+use crate::error::Error;
+use crate::{crypto, database, ui};
 
 pub const COOKIE_NAME : &str = "ear7h-token";
 
-type DynReply = Result<Box<dyn Reply>, Infallible>;
-type AuthzReply<T> = Result<T, Rejection>;
+type Request = http::Request<Body>;
+type Response = http::Response<Body>;
+type Mux = mux::Mux<Error, (), Body, Response>;
 
 pub struct ServerInner {
     pub server_name :  String,
@@ -27,215 +29,222 @@ pub struct ServerInner {
 
 pub type Server = Arc<ServerInner>;
 
-fn with_server(
-    server : &Server,
-) -> impl Filter<Extract = (Server,), Error = Infallible> + Clone {
-    let f = |server : Server| warp::any().map(move || Arc::clone(&server));
+/// url variable for user IDs which may be "self" or the user id
+struct UserId(Option<u32>);
 
-    (f)(Arc::clone(server))
-}
-
-fn with_authn(
-    server : &Server,
-) -> impl Filter<Extract = (models::User,), Error = Rejection> + Clone {
-    warp::any()
-        .and(with_server(server))
-        .and(filters::cookie::optional(COOKIE_NAME))
-        .and_then(
-            async move |server : Server,
-                        cookie_str : Option<String>|
-                        -> Result<models::User, Rejection> {
-                let value =
-                    cookie_str.as_ref().ok_or(Error::FailedLogin).and_then(
-                        |s| s.split(",").next().ok_or(Error::FailedLogin),
-                    )?;
-
-                let tok = crypto::Token::validate(
-                    value,
-                    &server.token_secret,
-                    &server.server_name,
-                )
-                .map_err(|_| Error::FailedLogin)?;
-
-                let user_id =
-                    u32::from_str(&tok.sub).map_err(|_| Error::FailedLogin)?;
-
-                Ok(server.db.get_user(user_id).await?)
-            },
-        )
-}
-
-type BoxReply = Box<dyn Reply>;
-type HandlerResult = Result<BoxReply, Infallible>;
-
-macro_rules! handler {
-    ($name:ident ( $($aname:ident : $atype:ty),*) $body:block) => {
-        pub fn $name (
-            $(
-                $aname : $atype,
-            )*
-        ) -> impl Filter<Extract = (BoxReply,) , Error = Rejection> + Clone {
-            $body
+impl UserId {
+    /// compares the optional id in self id with a concrete one, if there's a match
+    /// the concrete id is returned.
+    fn compare(&self, id : u32) -> Option<u32> {
+        if self.0.is_none() || self.0.unwrap() == id {
+            Some(id)
+        } else {
+            None
         }
     }
 }
 
-macro_rules! handler_or{
-    ($head:expr $(, $tail:expr)*) => {
-        $head
-        $(
-            .or($tail)
-            .unify()
-            .boxed()
-        )*
-    };
-    ($head:expr $(, $tail:expr)*,) => {
-        handler_or!($head $(, $tail)*)
+impl FromStr for UserId {
+    type Err = <u32 as FromStr>::Err;
+
+    fn from_str(s : &str) -> Result<Self, Self::Err> {
+        if s == "self" {
+            return Ok(UserId(None))
+        }
+
+        u32::from_str(s)
+            .map(Some)
+            .map(UserId)
     }
 }
 
-pub fn routes(
-    server : &Server,
-) -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone {
-    handler_or!(
-        get_login(server),
-        post_login(server),
-        get_users_links(server),
-        post_users_links(server),
-    )
-    .recover(async move |err : Rejection| -> Result<Error, Rejection> {
-        use Error::*;
-        let err = if err.is_not_found() {
-            RouteNotFound
-        } else if let Some(err) = err.find(): Option<&ErrorCell> {
-            err.take().await.unwrap_or(Internal)
-        } else {
-            eprintln!("{:?}", err);
-            Internal
-        };
+fn log_middleware<P>(next : P) -> impl Pipe<Input = (SocketAddr, Request), Output = P::Output>
+where
+    P : Pipe<Input = (Request,), Output = Response> + Send + Sync + 'static,
+{
+    // TODO: probably not ideal?
+    // bettern than cloning the whole mux
+    let next = Arc::new(next);
 
-        Ok(err)
-    })
-    .with(warp::log::custom(|info| {
-        eprintln!(
-            "{} {} {} in {:?}",
-            info.status(),
-            info.method(),
-            info.path(),
-            info.elapsed()
+    plumb::id()
+    .aseq(|addr, req : Request| async move {
+        let pre_details = format!(
+            "{:?} {} {:?}",
+            req.method(),
+            req.uri().path(),
+            addr,
         );
-    }))
+
+        let start = tokio::time::Instant::now();
+
+        let res = next.run((req,)).await;
+
+        let end = tokio::time::Instant::now();
+        let delta = end - start;
+
+        println!(
+            "{} {} {:?}",
+            res.status(),
+            pre_details,
+            delta
+        );
+
+        res
+    })
 }
 
-handler! { post_users_links (server : &Server) {
-    #[derive(Deserialize)]
-    struct PostLinksForm{
-        links : String,
+
+fn with_authn<S>(server : Server) ->
+    impl Fn(S) -> Result<
+        <S as Append<u32>>::Output,
+        Error,
+    > + Clone
+where
+    S : Pluck<Head = Request> + Append<u32>
+{
+    move |s| {
+        let (req, tail) = s.pluck();
+
+        for cookie in req.headers().get_all(http::header::COOKIE) {
+            let cookie_str = if let Ok(s) = cookie.to_str() {
+                s
+            } else {
+                continue
+            };
+
+            match Cookie::parse(cookie_str) {
+                Ok(c) if c.name() == COOKIE_NAME => {
+                    let tok = crypto::Token::validate(
+                        c.value(),
+                        &server.token_secret,
+                        &server.server_name,
+                    ).map_err(|_| Error::FailedLogin)?;
+
+                    // get the user id
+                    return u32::from_str(&tok.sub)
+                        .map(|id| tail.prepend(req).append(id))
+                        .map_err(|_| Error::FailedLogin)
+                },
+                _ => {}
+            }
+        }
+
+        return Err(Error::FailedLogin)
+    }
+}
+
+
+pub fn routes(server : Server) -> impl Pipe<Input = (SocketAddr, Request), Output = Response> {
+    macro_rules! register_routes {
+        ($($route:ident,)*) => {
+            {
+                let mux = mux::new_mux::<Error, _, _>();
+
+                $(let mux = $route(Arc::clone(&server), mux);)*
+
+                mux
+            }
+        }
     }
 
-    warp::path!("api" / "users" / u32 / "links").map(Some)
-        .or(warp::path!("api" / "users" / "self" / "links").map(|| None))
-        .unify()
-        .and(method::post())
-        .and(with_authn(server))
-        .and_then(async move |
-                  user_id : Option<u32>,
-                  token : models::User
-        | -> AuthzReply<u32> {
-            match user_id {
-                Some(id) if id != token.id => Err(Error::Unauthorized.into()),
-                Some(id) => Ok(id),
-                None => Ok(token.id),
+    let mux = register_routes!{
+        get_users_links,
+        post_users_links,
+        get_login,
+        post_login,
+    }
+    .tuple()
+    .seq(|res : Result<Response, Error>| {
+        match res {
+            Ok(res) => res,
+            Err(err) => render_error(err),
+        }
+    });
+
+    log_middleware(mux)
+}
+
+
+fn get_users_links(server : Server, m : Mux) -> Mux {
+
+    m.handle(
+        route!(GET / "api" / "users" / UserId / "links"),
+        mux::new_handler()
+        .map_tuple().and_then(with_authn(server.clone()))
+        .and_then(|req, url_id : UserId, token_id : u32| {
+            // authz
+            url_id.compare(token_id)
+            .map(|id| Ok((req, id)))
+            .unwrap_or(Err(Error::Unauthorized))
+        })
+        .map_bind(server.clone())
+        .aand_then(|_req, user_id, server : Server| async move {
+            let links = server.db.get_links(user_id).await?;
+            let user = server.db.get_user(user_id).await?;
+            let page = server.render.users_links(&user, links.as_slice(), true);
+
+            Ok(Response::new(page.into()))
+        })
+    )
+}
+
+fn post_users_links(server : Server, m : Mux) -> Mux {
+    m.handle(
+        route!(POST / "api" / "users" / UserId / "links"),
+        mux::new_handler()
+        .map_tuple().and_then(with_authn(server.clone()))
+        .and_then(|req, url_id : UserId, token_id : u32| {
+            // authz
+            if let Some(user_id) = url_id.compare(token_id) {
+                Ok((req, user_id))
+            } else {
+                Err(Error::Unauthorized)
             }
         })
-        .and(with_server(server))
-        .and(filters::body::form())
-        .and_then(async move |
-              user_id : u32,
-              server : Server,
-              body : PostLinksForm
-        | -> DynReply {
+        .map_bind(server.clone())
+        .aand_then(|req : Request, user_id, server : Server| async move {
+            let reader = hyper::body::aggregate(req.into_body()).await?.reader();
 
-            for line in body.links.lines() {
-                let u = match url::Url::parse(&line) {
-                    Ok(u) => u,
-                    Err(_) => {
-                        return Ok(box Error::InvalidUrl(line.to_string()))
-                    }
-                };
+            #[derive(Deserialize)]
+            struct PostLinksForm{
+                links : String,
+            }
+
+            let form : PostLinksForm = serde_urlencoded::from_reader(reader)
+                .map_err(|_| Error::BadRequest)?;
+
+            for line in form.links.lines() {
+                let u = url::Url::parse(&line)
+                    .map_err(|_| Error::InvalidUrl(line.to_string()))?;
 
                 match server.db.insert_link(user_id, u.as_str()).await {
                     Ok(_) | Err(Error::DuplicateUrl(_)) => {},
-                    Err(err) => return Ok(box err),
+                    Err(err) => return Err(err)
                 }
             }
 
-            let links = match server.db.get_links(user_id).await {
-                Ok(links) => links,
-                Err(e) => return Ok(box e),
-            };
+            let links = server.db.get_links(user_id).await?;
+            let user = server.db.get_user(user_id).await?;
 
-            let user = match server.db.get_user(user_id).await {
-                Ok(user) => user,
-                Err(e) => return Ok(box e),
-            };
+            let page = server.render.users_links(&user, links.as_slice(), true);
 
-            let html = server.render
-                .users_links(&user, links.as_slice(), true);
-
-            Ok(box reply::html(html))
+            Ok(Response::new(page.into()))
         })
+    )
+}
 
-}}
-
-handler! { get_users_links (server : &Server) {
-    warp::path!("api" / "users" / u32 / "links").map(Some)
-        .or(warp::path!("api" / "users" / "self" / "links").map(|| None))
-        .unify()
-        .and(method::get())
-        .and(with_authn(server))
-        .and_then(async move |
-            user_id : Option<u32>,
-            token : models::User
-        | -> AuthzReply<u32> {
-            match user_id {
-                Some(id) if id != token.id => Err(Error::Unauthorized.into()),
-                Some(id) => Ok(id),
-                None => Ok(token.id),
-            }
+fn get_login(server : Server, m : Mux) -> Mux {
+    m.handle(
+        route!(GET / "api" / "login"),
+        mux::new_handler()
+        .map_bind(server.clone())
+        .map(|_, server : Server| {
+            Response::new(server.render.login().into())
         })
-        .and(with_server(server))
-        .and_then(async move |user_id : u32, server : Server| -> DynReply {
+    )
+}
 
-            let links = match server.db.get_links(user_id).await {
-                Ok(links) => links,
-                Err(e) => return Ok(box Error::from(e)),
-            };
-
-            let user = match server.db.get_user(user_id).await {
-                Ok(user) => user,
-                Err(e) => return Ok(box e),
-            };
-
-            let html = server.render
-                .users_links(&user, links.as_slice(), true);
-
-            Ok(box reply::html(html))
-        })
-}}
-
-handler! { get_login (server : &Server) {
-    warp::path!("api" / "login")
-        .and(method::get())
-        .and(with_server(server))
-        .and_then(async move |server : Server| -> DynReply {
-            let html = server.render.login();
-
-            Ok(box reply::html(html))
-        })
-}}
-
-handler! { post_login (server : &Server) {
+fn post_login(server : Server, m : Mux) -> Mux {
     #[derive(Deserialize)]
     struct Req {
         username : String,
@@ -246,11 +255,11 @@ handler! { post_login (server : &Server) {
         token : String,
     }
 
-    impl Reply for Res {
-        fn into_response(self) -> Response {
+    impl Into<Response> for Res {
+        fn into(self) -> Response {
             let cookie = Cookie::build(COOKIE_NAME, self.token.clone())
                 .http_only(true)
-                .same_site(SameSite::Strict)
+                .same_site(cookie::SameSite::Strict)
                 .path("/")
                 .finish()
                 .to_string();
@@ -264,28 +273,25 @@ handler! { post_login (server : &Server) {
         }
     }
 
-    warp::path!("api" / "login")
-        .and(method::post())
-        .and(with_server(server))
-        .and(filters::body::form())
-        .and_then(async move |server : Server, body : Req| -> HandlerResult {
-            let user = match server.db.get_user_by_name(&body.username).await {
-                Ok(u) => u,
-                Err(err) => return Ok(box err),
-            };
+    m.handle(
+        route!(POST / "api" / "login"),
+        mux::new_handler()
+        .map_bind(server.clone())
+        .aand_then(|req : Request, server : Server| async move {
+            let reader = hyper::body::aggregate(req.into_body()).await?.reader();
 
-            match crypto::verify_password(
-                &user.password,
-                body.password.as_bytes(),
-            ) {
-                Ok(true) => {},
-                Ok(false) => return Ok(box Error::FailedLogin),
-                Err(err) => return Ok(box err),
+            let form : Req = serde_urlencoded::from_reader(reader)
+                .map_err(|_| Error::BadRequest)?;
+
+            let user = server.db.get_user_by_name(&form.username).await?;
+
+            if !crypto::verify_password(&user.password, form.password.as_bytes())? {
+                return Err(Error::FailedLogin)
             }
 
             const DAYS : u64 = 60 * 60 * 24;
 
-            let tok = crypto::Token{
+            let token = crypto::Token{
                 iss : server.server_name.to_string(),
                 aud : server.server_name.to_string(),
                 sub : user.id.to_string(),
@@ -293,53 +299,48 @@ handler! { post_login (server : &Server) {
             }.issue(
                 &server.token_secret,
                 std::time::Duration::from_secs(DAYS * 30),
-            );
+            )?;
 
-            let tok = match tok {
-                Ok(tok) => tok,
-                Err(err) => return Ok(box err),
-            };
-
-            Ok(box Res{
-                token : tok,
-            })
+            Ok(Res{token}.into())
         })
-}}
-
-impl Reject for ErrorCell {}
-
-impl From<Error> for Rejection {
-    fn from(err : Error) -> Rejection {
-        ErrorCell::new(err).into()
-    }
+    )
 }
 
-impl Reply for Error {
-    fn into_response(self) -> warp::reply::Response {
-        use http::StatusCode as S;
-        use Error::*;
 
-        eprintln!("{:?}", &self);
+fn render_error(err : Error) -> Response {
+    use http::StatusCode as S;
+    use Error::*;
 
-        let res = http::response::Builder::new();
+    eprintln!("{:?}", &err);
 
-        match self {
-            InvalidUrl(s) => res
-                .status(S::BAD_REQUEST)
-                .body(format!("invalid url: {}", s).into()),
-            DuplicateUrl(s) => res
-                .status(S::CONFLICT)
-                .body(format!("duplicate url: {}", s).into()),
-            RouteNotFound => res
-                .status(S::NOT_FOUND)
-                .body(format!("route not found").into()),
-            FailedLogin => res
-                .status(S::UNAUTHORIZED)
-                .body(include_str!("../ui/failed-login.html").into()),
-            _ => res
-                .status(S::INTERNAL_SERVER_ERROR)
-                .body("internal server error".into()),
+    let status;
+    let body;
+
+    match err {
+        InvalidUrl(s) => {
+            status = S::BAD_REQUEST;
+            body = format!("invalid url: {}", s);
+        },
+        DuplicateUrl(s) => {
+            status = S::CONFLICT;
+            body = format!("duplicate url: {}", s);
+        },
+        RouteNotFound => {
+           status = S::NOT_FOUND;
+           body = "route not found".to_string();
+        },
+        FailedLogin => {
+           status = S::UNAUTHORIZED;
+           body = include_str!("../ui/failed-login.html").to_string();
+        },
+        _ => {
+            status = S::INTERNAL_SERVER_ERROR;
+            body   = "internal server error".to_string();
         }
-        .unwrap()
     }
+
+   http::response::Builder::new()
+       .status(status)
+       .body(body.into())
+       .unwrap()
 }

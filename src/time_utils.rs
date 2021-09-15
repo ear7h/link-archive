@@ -3,7 +3,7 @@ use serde::{Serialize, Serializer};
 #[derive(Debug)]
 pub struct Time(time::OffsetDateTime);
 
-crate const TIME_FORMAT : &'static [time::format_description::FormatItem<
+pub(crate) const TIME_FORMAT : &'static [time::format_description::FormatItem<
     'static,
 >] = time::macros::format_description!(
     "[year]-[month]-[day] [hour]:[minute]:[second]"

@@ -14,7 +14,7 @@ fn error_code_match(
             err,
             rusqlite::Error::SqliteFailure(e, _)
                 if e.code == code
-                && (e.extended_code.into() : i64) == ext)
+                && i64::from(e.extended_code) == ext)
 }
 
 macro_rules! db_method {
@@ -255,7 +255,7 @@ impl FromSql for models::Time {
         let s : String = String::column_result(value)?;
 
         let dt = time::PrimitiveDateTime::parse(&s, &TIME_FORMAT)
-            .map_err(|err| FromSqlError::Other(box err))?;
+            .map_err(|err| FromSqlError::Other(Box::new(err)))?;
 
         Ok(dt.assume_offset(time::UtcOffset::UTC).into())
     }

@@ -1,6 +1,7 @@
 use std::sync::Arc;
+use std::net::SocketAddr;
 
-use link_archive::*;
+use link_archive::{database, api, ui};
 
 pub const TOKEN_SECRET : &[u8] = b"super-secret";
 pub const SERVER_NAME : &str = "links.ear7h.net";
@@ -16,7 +17,8 @@ async fn main() {
         render :       ui::Renderer::new(),
     });
 
-    let routes = api::routes(&server);
-
-    warp::serve(routes).run(([127, 0, 0, 1], 3030)).await;
+    let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
+    http_mux::hyper::serve_addr(api::routes(server), &addr).await.unwrap();
 }
+
+
