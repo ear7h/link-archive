@@ -1,3 +1,4 @@
 #!/bin/bash
 
-cat $(find migrations -type file | sort)
+dir=$(git rev-parse --show-toplevel)/sql/migrations
+cat $(find $dir -type f | sort)

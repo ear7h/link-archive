@@ -1,4 +1,4 @@
 /target
 *.sqlite3
-config.env
+config.json
 result
