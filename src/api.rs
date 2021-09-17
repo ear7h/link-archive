@@ -93,12 +93,21 @@ where
 
     plumb::id()
     .aseq(|addr, req : Request| async move {
-        let pre_details = format!(
-            "{:?} {} {:?}",
-            req.method(),
-            req.uri().path(),
-            addr,
-        );
+        let pre_details = if let Some(addr) =  req.headers().get("x-forwarded-for") {
+            format!(
+                "{:?} {} {}",
+                addr,
+                req.method(),
+                req.uri().path(),
+            )
+        } else {
+            format!(
+                "{:?} {} {}",
+                addr,
+                req.method(),
+                req.uri().path(),
+            )
+        };
 
         let start = tokio::time::Instant::now();
 
