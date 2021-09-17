@@ -29,6 +29,31 @@ pub struct ServerInner {
 
 pub type Server = Arc<ServerInner>;
 
+#[derive(Deserialize)]
+struct Config {
+    server_name :  String,
+    port : u16,
+    token_secret : String,
+    database : String,
+
+}
+
+pub fn new_server(config_file : &str) -> Result<(Server, SocketAddr), Error> {
+    let file = std::fs::File::open(config_file)?;
+    let conf : Config = serde_json::from_reader(file)?;
+
+    let addr = SocketAddr::from(([127, 0, 0, 1], conf.port));
+
+    let server = Arc::new(ServerInner {
+        token_secret : base64::decode(conf.token_secret)?,
+        server_name :  conf.server_name,
+        db :           database::Db::new(&conf.database)?,
+        render :       ui::Renderer::new(),
+    });
+
+    Ok((server, addr))
+}
+
 /// url variable for user IDs which may be "self" or the user id
 struct UserId(Option<u32>);
 
@@ -263,7 +288,6 @@ fn post_login(server : Server, m : Mux) -> Mux {
                 .path("/")
                 .finish()
                 .to_string();
-            dbg!(&cookie);
 
             http::response::Builder::new()
                 .header(header::LOCATION, "/api/users/self/links")

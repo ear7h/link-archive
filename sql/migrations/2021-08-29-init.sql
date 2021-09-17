@@ -1,6 +1,13 @@
-BEGIN;
-
 PRAGMA foreign_keys = ON;
+
+BEGIN EXCLUSIVE;
+
+CREATE TABLE migrations (
+	name text NOT NULL UNIQUE,
+	created text NOT NULL DEFAULT (datetime('now', 'utc'))
+);
+
+INSERT INTO migrations (name) VALUES ('2021-08-29-init.sql');
 
 CREATE TABLE users (
 	id integer PRIMARY KEY,

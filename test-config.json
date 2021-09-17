@@ -1,0 +1,6 @@
+{
+	"server_name" : "links.ear7h.net",
+	"port" : 3000,
+	"token_secret" : "InN1cGVyLXNlY3JldCIK",
+	"database" : "links.sqlite3"
+}

@@ -1,23 +1,20 @@
-use std::sync::Arc;
-use std::net::SocketAddr;
 
-use link_archive::{database, api, ui};
-
-pub const TOKEN_SECRET : &[u8] = b"super-secret";
-pub const SERVER_NAME : &str = "links.ear7h.net";
+use link_archive::api;
 
 #[tokio::main]
 async fn main() {
-    println!("Hello, world!");
+    println!("starting server");
 
-    let server = Arc::new(api::ServerInner {
-        token_secret : TOKEN_SECRET.to_owned(),
-        server_name :  SERVER_NAME.to_owned(),
-        db :           database::Db::new("links.sqlite3").unwrap(),
-        render :       ui::Renderer::new(),
-    });
+    let args = std::env::args().collect::<Vec<_>>();
+    let config = match &args[..] {
+        [_, config] => config,
+        _ => {
+            eprintln!("usage: ./link-archive config.json");
+            std::process::exit(1);
+        }
+    };
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
+    let (server, addr) = api::new_server(&config).unwrap();
     http_mux::hyper::serve_addr(api::routes(server), &addr).await.unwrap();
 }
 

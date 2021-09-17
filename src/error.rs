@@ -14,6 +14,8 @@ pub enum Error {
     FailedLogin,
     Unauthorized,
     BadRequest,
+    RouteNotFound,
+    Internal,
 
     #[quick_from]
     Sqlite(rusqlite::Error),
@@ -30,8 +32,14 @@ pub enum Error {
     #[quick_from]
     Hyper(hyper::Error),
 
-    RouteNotFound,
-    Internal,
+    #[quick_from]
+    Json(serde_json::Error),
+
+    #[quick_from]
+    Io(std::io::Error),
+
+    #[quick_from]
+    Base64(base64::DecodeError),
 }
 
 impl From<MuxError> for Error {
