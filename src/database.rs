@@ -18,17 +18,17 @@ fn error_code_match(
 }
 
 macro_rules! db_method {
-        ($name:ident (
-            &$self:ident,
-            $conn:ident,
-            $($pname:ident : $ptype:ty),*
-        ) -> $ret:ty $body:block ) => {
-            pub async fn $name (&$self, $( $pname : $ptype, )* ) -> $ret {
-                let $conn = $self.conn.lock().await;
-                tokio::task::block_in_place(|| $body)
-            }
+    ($name:ident (
+        &$self:ident,
+        $conn:ident,
+        $($pname:ident : $ptype:ty),*
+    ) -> $ret:ty $body:block ) => {
+        pub async fn $name (&$self, $( $pname : $ptype, )* ) -> $ret {
+            let $conn = $self.conn.lock().await;
+            tokio::task::block_in_place(|| $body)
         }
     }
+}
 
 pub struct Db {
     conn : Mutex<Connection>,
@@ -66,6 +66,27 @@ impl Db {
                 }
             })?;
         Ok(())
+    }}
+
+    db_method! {upsert_user(
+        &self,
+        conn,
+        name : &str
+    ) -> Result<models::User> {
+        let mut stmt = conn
+            .prepare_cached("
+                INSERT INTO users (name)
+                VALUES (?)
+                ON CONFLICT (name)
+                DO UPDATE SET name = name
+                RETURNING *
+            ")?;
+
+        let mut rows = stmt.query(rusqlite::params![name])?;
+
+        let row = rows.next()?.unwrap();
+
+        Ok(row_parse(row)?)
     }}
 
     db_method! {get_user(&self, conn, user_id : u32) -> Result<models::User> {
@@ -243,7 +264,7 @@ macro_rules! impl_from_row {
     }
 
 impl_from_row! {users, models::User {
-    id, name, password, token_version, created, deleted
+    id, name, created, deleted
 }}
 
 impl_from_row! {links, models::Link {

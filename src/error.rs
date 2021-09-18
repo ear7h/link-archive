@@ -21,13 +21,7 @@ pub enum Error {
     Sqlite(rusqlite::Error),
 
     #[quick_from]
-    Argon2(argon2::Error),
-
-    #[quick_from]
     Time(std::time::SystemTimeError),
-
-    #[quick_from]
-    Jwt(jsonwebtoken::errors::ErrorKind),
 
     #[quick_from]
     Hyper(hyper::Error),
@@ -39,7 +33,7 @@ pub enum Error {
     Io(std::io::Error),
 
     #[quick_from]
-    Base64(base64::DecodeError),
+    Authn(authn::client::Error),
 }
 
 impl From<MuxError> for Error {

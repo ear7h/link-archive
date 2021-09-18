@@ -2,5 +2,12 @@
 	"server_name" : "links.ear7h.net",
 	"port" : 3000,
 	"token_secret" : "InN1cGVyLXNlY3JldCIK",
-	"database" : "links.sqlite3"
+	"database" : "/Users/julio/projects/link-archive/links.sqlite3",
+	"authn" : {
+		"server_path" : "/Users/julio/projects/authn/src/authn.sock",
+		"server_name" : "authn.ear7h.net",
+		"client_name" : "links.ear7h.net",
+		"alg" : "ES256",
+		"pub_key_file" : "/Users/julio/projects/authn/src/test-pub-key.pem"
+	}
 }

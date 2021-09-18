@@ -1,6 +1,8 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::str::FromStr;
+use std::convert::TryInto;
+use std::time::Duration;
 
 use serde::Deserialize;
 use plumb::{Pipe, PipeExt};
@@ -12,7 +14,7 @@ use http_mux::{route, mux};
 use cookie::Cookie;
 
 use crate::error::Error;
-use crate::{crypto, database, ui};
+use crate::{database, ui};
 
 pub const COOKIE_NAME : &str = "ear7h-token";
 
@@ -21,32 +23,30 @@ type Response = http::Response<Body>;
 type Mux = mux::Mux<Error, (), Body, Response>;
 
 pub struct ServerInner {
-    pub server_name :  String,
-    pub token_secret : Vec<u8>,
     pub db :           database::Db,
     pub render :       ui::Renderer,
+    pub authn :        authn::client::Client,
 }
 
 pub type Server = Arc<ServerInner>;
 
 #[derive(Deserialize)]
 struct Config {
-    server_name :  String,
     port : u16,
-    token_secret : String,
     database : String,
-
+    authn : authn::client::Config,
 }
 
 pub fn new_server(config_file : &str) -> Result<(Server, SocketAddr), Error> {
     let file = std::fs::File::open(config_file)?;
     let conf : Config = serde_json::from_reader(file)?;
 
+    let authn : authn::client::Client = conf.authn.try_into()?;
+
     let addr = SocketAddr::from(([127, 0, 0, 1], conf.port));
 
     let server = Arc::new(ServerInner {
-        token_secret : base64::decode(conf.token_secret)?,
-        server_name :  conf.server_name,
+        authn,
         db :           database::Db::new(&conf.database)?,
         render :       ui::Renderer::new(),
     });
@@ -128,44 +128,46 @@ where
 }
 
 
-fn with_authn<S>(server : Server) ->
-    impl Fn(S) -> Result<
-        <S as Append<u32>>::Output,
-        Error,
+fn with_authn<S>(server_orig : Server) ->
+    impl Fn(S) -> plumb::PinBoxFut<
+        Result<
+            <S as Append<u32>>::Output,
+            Error
+        >
     > + Clone
 where
-    S : Pluck<Head = Request> + Append<u32>
+    S : Pluck<Head = Request> + Append<u32> + Send + 'static,
+    <S as Pluck>::Tail : Send,
 {
-    move |s| {
-        let (req, tail) = s.pluck();
+    move |s : S| {
+        let server = server_orig.clone();
+        Box::pin(async move {
+            let (req, tail) = s.pluck();
 
-        for cookie in req.headers().get_all(http::header::COOKIE) {
-            let cookie_str = if let Ok(s) = cookie.to_str() {
-                s
-            } else {
-                continue
-            };
+            for cookie in req.headers().get_all(http::header::COOKIE) {
+                let cookie_str = if let Ok(s) = cookie.to_str() {
+                    s
+                } else {
+                    continue
+                };
 
-            match Cookie::parse(cookie_str) {
-                Ok(c) if c.name() == COOKIE_NAME => {
-                    let tok = crypto::Token::validate(
-                        c.value(),
-                        &server.token_secret,
-                        &server.server_name,
-                    ).map_err(|_| Error::FailedLogin)?;
+                match Cookie::parse(cookie_str) {
+                    Ok(c) if c.name() == COOKIE_NAME => {
 
-                    // get the user id
-                    return u32::from_str(&tok.sub)
-                        .map(|id| tail.prepend(req).append(id))
-                        .map_err(|_| Error::FailedLogin)
-                },
-                _ => {}
+                        let name = server.authn.validate_token(c.value()).await?;
+                        let user_id = server.db.get_user_by_name(&name).await?.id;
+
+                        return Ok(tail.prepend(req).append(user_id))
+                    },
+                    _ => {}
+                }
             }
-        }
 
-        return Err(Error::FailedLogin)
+            return Err(Error::FailedLogin)
+        })
     }
 }
+
 
 
 pub fn routes(server : Server) -> impl Pipe<Input = (SocketAddr, Request), Output = Response> {
@@ -204,7 +206,7 @@ fn get_users_links(server : Server, m : Mux) -> Mux {
     m.handle(
         route!(GET / "api" / "users" / UserId / "links"),
         mux::new_handler()
-        .map_tuple().and_then(with_authn(server.clone()))
+        .map_tuple().aand_then(with_authn(server.clone()))
         .and_then(|req, url_id : UserId, token_id : u32| {
             // authz
             url_id.compare(token_id)
@@ -226,7 +228,7 @@ fn post_users_links(server : Server, m : Mux) -> Mux {
     m.handle(
         route!(POST / "api" / "users" / UserId / "links"),
         mux::new_handler()
-        .map_tuple().and_then(with_authn(server.clone()))
+        .map_tuple().aand_then(with_authn(server.clone()))
         .and_then(|req, url_id : UserId, token_id : u32| {
             // authz
             if let Some(user_id) = url_id.compare(token_id) {
@@ -316,23 +318,16 @@ fn post_login(server : Server, m : Mux) -> Mux {
             let form : Req = serde_urlencoded::from_reader(reader)
                 .map_err(|_| Error::BadRequest)?;
 
-            let user = server.db.get_user_by_name(&form.username).await?;
+            let token = server.authn.login(
+                &form.username,
+                &form.password,
+                Duration::from_secs(60 * 60 * 24 * 7),
+            ).await.map_err(|err| {
+                eprintln!("{:?}", err);
+                Error::FailedLogin
+            })?;
 
-            if !crypto::verify_password(&user.password, form.password.as_bytes())? {
-                return Err(Error::FailedLogin)
-            }
-
-            const DAYS : u64 = 60 * 60 * 24;
-
-            let token = crypto::Token{
-                iss : server.server_name.to_string(),
-                aud : server.server_name.to_string(),
-                sub : user.id.to_string(),
-                version : user.token_version,
-            }.issue(
-                &server.token_secret,
-                std::time::Duration::from_secs(DAYS * 30),
-            )?;
+            server.db.upsert_user(&form.username).await?;
 
             Ok(Res{token}.into())
         })

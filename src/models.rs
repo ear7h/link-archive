@@ -6,8 +6,6 @@ pub type Time = crate::time_utils::Time;
 pub struct User {
     pub id :            u32,
     pub name :          String,
-    pub password :      String,
-    pub token_version : u32,
     pub created :       Time,
     pub deleted :       Option<Time>,
 }

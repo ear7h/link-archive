@@ -142,6 +142,68 @@ rec {
           "default" = [ "std" ];
         };
       };
+      "authn" = rec {
+        crateName = "authn";
+        version = "0.1.0";
+        edition = "2018";
+        crateBin = [];
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/ear7h/authn";
+          rev = "4009bfaf1a6c30c09ebb439d12ae9cefd89dc5c9";
+          sha256 = "0svls49hipz12ykfrcd6zxz1d5sbwywax8zfgcv81ddc9cahxpa7";
+        };
+        dependencies = [
+          {
+            name = "http";
+            packageId = "http";
+          }
+          {
+            name = "hyper";
+            packageId = "hyper";
+            features = [ "tcp" "http1" "server" "client" ];
+          }
+          {
+            name = "hyperlocal";
+            packageId = "hyperlocal";
+          }
+          {
+            name = "jsonwebtoken";
+            packageId = "jsonwebtoken";
+          }
+          {
+            name = "quick_from";
+            packageId = "quick_from";
+          }
+          {
+            name = "rand";
+            packageId = "rand";
+          }
+          {
+            name = "rust-argon2";
+            packageId = "rust-argon2";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            features = [ "full" ];
+          }
+        ];
+        features = {
+          "cli" = [ "rpassword" ];
+          "server" = [ "http-mux" "plumb" "rusqlite" ];
+        };
+      };
       "autocfg" = rec {
         crateName = "autocfg";
         version = "1.0.1";
@@ -584,6 +646,43 @@ rec {
         };
         resolvedDefaultFeatures = [ "alloc" "std" ];
       };
+      "futures-macro" = rec {
+        crateName = "futures-macro";
+        version = "0.3.17";
+        edition = "2018";
+        sha256 = "1fvriw31ippggp8496dpbvkykr2fgk57amhwrz5lqjzabjws9r0q";
+        procMacro = true;
+        authors = [
+          "Taylor Cramer <cramertj@google.com>"
+          "Taiki Endo <te316e89@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "proc-macro-hack";
+            packageId = "proc-macro-hack";
+          }
+          {
+            name = "proc-macro2";
+            packageId = "proc-macro2";
+          }
+          {
+            name = "quote";
+            packageId = "quote";
+          }
+          {
+            name = "syn";
+            packageId = "syn";
+            features = [ "full" ];
+          }
+        ];
+        buildDependencies = [
+          {
+            name = "autocfg";
+            packageId = "autocfg";
+          }
+        ];
+
+      };
       "futures-task" = rec {
         crateName = "futures-task";
         version = "0.3.17";
@@ -596,6 +695,7 @@ rec {
           "default" = [ "std" ];
           "std" = [ "alloc" ];
         };
+        resolvedDefaultFeatures = [ "alloc" "std" ];
       };
       "futures-util" = rec {
         crateName = "futures-util";
@@ -612,6 +712,12 @@ rec {
             usesDefaultFeatures = false;
           }
           {
+            name = "futures-macro";
+            packageId = "futures-macro";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+          {
             name = "futures-task";
             packageId = "futures-task";
             usesDefaultFeatures = false;
@@ -623,6 +729,21 @@ rec {
           {
             name = "pin-utils";
             packageId = "pin-utils";
+          }
+          {
+            name = "proc-macro-hack";
+            packageId = "proc-macro-hack";
+            optional = true;
+          }
+          {
+            name = "proc-macro-nested";
+            packageId = "proc-macro-nested";
+            optional = true;
+          }
+          {
+            name = "slab";
+            packageId = "slab";
+            optional = true;
           }
         ];
         buildDependencies = [
@@ -645,6 +766,7 @@ rec {
           "unstable" = [ "futures-core/unstable" "futures-task/unstable" ];
           "write-all-vectored" = [ "io" ];
         };
+        resolvedDefaultFeatures = [ "alloc" "async-await" "async-await-macro" "default" "futures-macro" "proc-macro-hack" "proc-macro-nested" "slab" "std" ];
       };
       "generic-array" = rec {
         crateName = "generic-array";
@@ -796,6 +918,20 @@ rec {
           "rustc-dep-of-std" = [ "core" "compiler_builtins/rustc-dep-of-std" "libc/rustc-dep-of-std" ];
         };
         resolvedDefaultFeatures = [ "default" ];
+      };
+      "hex" = rec {
+        crateName = "hex";
+        version = "0.4.3";
+        edition = "2018";
+        sha256 = "0w1a4davm1lgzpamwnba907aysmlrnygbqmfis2mqjx5m552a93z";
+        authors = [
+          "KokaKiwi <kokakiwi@kokakiwi.net>"
+        ];
+        features = {
+          "default" = [ "std" ];
+          "std" = [ "alloc" ];
+        };
+        resolvedDefaultFeatures = [ "alloc" "default" "std" ];
       };
       "http" = rec {
         crateName = "http";
@@ -998,7 +1134,51 @@ rec {
           "runtime" = [ "tcp" "tokio/rt" ];
           "tcp" = [ "socket2" "tokio/net" "tokio/rt" "tokio/time" ];
         };
-        resolvedDefaultFeatures = [ "default" "http1" "server" "socket2" "tcp" ];
+        resolvedDefaultFeatures = [ "client" "default" "http1" "runtime" "server" "socket2" "tcp" ];
+      };
+      "hyperlocal" = rec {
+        crateName = "hyperlocal";
+        version = "0.8.0";
+        edition = "2018";
+        sha256 = "136978rsp0wr6x28cxivxhbq2np66l4jrq3n9xwckrrd5dxxzbqg";
+        authors = [
+          "softprops <d.tangren@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "futures-util";
+            packageId = "futures-util";
+          }
+          {
+            name = "hex";
+            packageId = "hex";
+          }
+          {
+            name = "hyper";
+            packageId = "hyper";
+            features = [ "server" "client" "http1" "runtime" ];
+          }
+          {
+            name = "pin-project";
+            packageId = "pin-project";
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            features = [ "rt-multi-thread" "net" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "tokio";
+            packageId = "tokio";
+            features = [ "rt-multi-thread" "net" "macros" "io-std" "io-util" ];
+          }
+        ];
+        features = {
+          "default" = [ "client" "server" ];
+        };
+        resolvedDefaultFeatures = [ "client" "default" "server" ];
       };
       "idna" = rec {
         crateName = "idna";
@@ -1147,6 +1327,11 @@ rec {
         ];
         buildDependencies = [
           {
+            name = "cc";
+            packageId = "cc";
+            optional = true;
+          }
+          {
             name = "pkg-config";
             packageId = "pkg-config";
             optional = true;
@@ -1171,7 +1356,7 @@ rec {
           "session" = [ "preupdate_hook" "buildtime_bindgen" ];
           "winsqlite3" = [ "min_sqlite_version_3_7_16" ];
         };
-        resolvedDefaultFeatures = [ "default" "min_sqlite_version_3_6_8" "pkg-config" "vcpkg" ];
+        resolvedDefaultFeatures = [ "bundled" "bundled_bindings" "cc" "default" "min_sqlite_version_3_6_8" "pkg-config" "vcpkg" ];
       };
       "link-archive" = rec {
         crateName = "link-archive";
@@ -1179,17 +1364,12 @@ rec {
         edition = "2018";
         crateBin = [
           { name = "link-archive"; path = "src/main.rs"; }
-          { name = "add_user"; path = "src/bin/add_user.rs"; }
         ];
         src = lib.cleanSourceWith { filter = sourceFilter;  src = ./.; };
         dependencies = [
           {
-            name = "base64";
-            packageId = "base64 0.13.0";
-          }
-          {
-            name = "bytes";
-            packageId = "bytes";
+            name = "authn";
+            packageId = "authn";
           }
           {
             name = "cookie";
@@ -1214,10 +1394,6 @@ rec {
             features = [ "tcp" "http1" "server" ];
           }
           {
-            name = "jsonwebtoken";
-            packageId = "jsonwebtoken";
-          }
-          {
             name = "plumb";
             packageId = "plumb";
           }
@@ -1226,17 +1402,9 @@ rec {
             packageId = "quick_from";
           }
           {
-            name = "rand";
-            packageId = "rand";
-          }
-          {
             name = "rusqlite";
             packageId = "rusqlite";
-          }
-          {
-            name = "rust-argon2";
-            packageId = "rust-argon2";
-            usesDefaultFeatures = false;
+            features = [ "bundled" ];
           }
           {
             name = "serde";
@@ -1765,6 +1933,49 @@ rec {
         ];
 
       };
+      "pin-project" = rec {
+        crateName = "pin-project";
+        version = "1.0.8";
+        edition = "2018";
+        sha256 = "020c5nyj7qpyqn6xwy3hw6vgm31mifq9g7p916n5vihc480chssp";
+        authors = [
+          "Taiki Endo <te316e89@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "pin-project-internal";
+            packageId = "pin-project-internal";
+            usesDefaultFeatures = false;
+          }
+        ];
+
+      };
+      "pin-project-internal" = rec {
+        crateName = "pin-project-internal";
+        version = "1.0.8";
+        edition = "2018";
+        sha256 = "12gkrjd7xzwa3vlhpzxbxlbwisi2dw8l1q62v867zkhl7lbfi3vf";
+        procMacro = true;
+        authors = [
+          "Taiki Endo <te316e89@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "proc-macro2";
+            packageId = "proc-macro2";
+          }
+          {
+            name = "quote";
+            packageId = "quote";
+          }
+          {
+            name = "syn";
+            packageId = "syn";
+            features = [ "full" "visit-mut" ];
+          }
+        ];
+
+      };
       "pin-project-lite" = rec {
         crateName = "pin-project-lite";
         version = "0.2.7";
@@ -1821,6 +2032,16 @@ rec {
         edition = "2018";
         sha256 = "1rg0kzsj7lj00qj602d3h77spwfz48vixn1wbjp7a4yrq65w9w6v";
         procMacro = true;
+        authors = [
+          "David Tolnay <dtolnay@gmail.com>"
+        ];
+
+      };
+      "proc-macro-nested" = rec {
+        crateName = "proc-macro-nested";
+        version = "0.1.7";
+        edition = "2015";
+        sha256 = "11hh1jynh62f3m1ii0f9gf1l3y0fhkwpmr40lz3704v848n1p25w";
         authors = [
           "David Tolnay <dtolnay@gmail.com>"
         ];
@@ -2224,6 +2445,7 @@ rec {
           "winsqlite3" = [ "libsqlite3-sys/winsqlite3" ];
           "with-asan" = [ "libsqlite3-sys/with-asan" ];
         };
+        resolvedDefaultFeatures = [ "bundled" "modern_sqlite" ];
       };
       "rust-argon2" = rec {
         crateName = "rust-argon2";
@@ -2531,6 +2753,19 @@ rec {
         ];
 
       };
+      "slab" = rec {
+        crateName = "slab";
+        version = "0.4.4";
+        edition = "2018";
+        sha256 = "1465rj4y59qjvzxik0v2m0mp71q50m9xfigxqww7yhsw3hna61y3";
+        authors = [
+          "Carl Lerche <me@carllerche.com>"
+        ];
+        features = {
+          "default" = [ "std" ];
+        };
+        resolvedDefaultFeatures = [ "default" "std" ];
+      };
       "smallvec" = rec {
         crateName = "smallvec";
         version = "1.6.1";
@@ -2766,7 +3001,7 @@ rec {
           "proc-macro" = [ "proc-macro2/proc-macro" "quote/proc-macro" ];
           "test" = [ "syn-test-suite/all-features" ];
         };
-        resolvedDefaultFeatures = [ "clone-impls" "default" "derive" "full" "parsing" "printing" "proc-macro" "quote" "visit" ];
+        resolvedDefaultFeatures = [ "clone-impls" "default" "derive" "full" "parsing" "printing" "proc-macro" "quote" "visit" "visit-mut" ];
       };
       "time 0.1.43" = rec {
         crateName = "time";

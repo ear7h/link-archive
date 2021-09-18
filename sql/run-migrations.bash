@@ -7,9 +7,12 @@ fi
 
 latest=$(sqlite3 $1 "SELECT name FROM migrations ORDER BY name DESC LIMIT 1")
 
-for file in $(ls migrations | sort); do
+
+dir=$(git rev-parse --show-toplevel)/sql/migrations
+
+for file in $(ls $dir | sort); do
 	if [ $file ">" $latest ]; then
 		echo "running $file"
-		cat migrations/$file | sqlite3 -bail $1
+		cat $dir/$file | sqlite3 -bail $1
 	fi
 done
