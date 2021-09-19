@@ -188,6 +188,7 @@ pub fn routes(server : Server) -> impl Pipe<Input = (SocketAddr, Request), Outpu
         post_users_links,
         get_login,
         post_login,
+        get_logout,
     }
     .tuple()
     .seq(|res : Result<Response, Error>| {
@@ -204,7 +205,7 @@ pub fn routes(server : Server) -> impl Pipe<Input = (SocketAddr, Request), Outpu
 fn get_users_links(server : Server, m : Mux) -> Mux {
 
     m.handle(
-        route!(GET / "api" / "users" / UserId / "links"),
+        route!(GET / "users" / UserId / "links.html"),
         mux::new_handler()
         .map_tuple().aand_then(with_authn(server.clone()))
         .and_then(|req, url_id : UserId, token_id : u32| {
@@ -226,7 +227,7 @@ fn get_users_links(server : Server, m : Mux) -> Mux {
 
 fn post_users_links(server : Server, m : Mux) -> Mux {
     m.handle(
-        route!(POST / "api" / "users" / UserId / "links"),
+        route!(POST / "users" / UserId / "links.html"),
         mux::new_handler()
         .map_tuple().aand_then(with_authn(server.clone()))
         .and_then(|req, url_id : UserId, token_id : u32| {
@@ -270,12 +271,43 @@ fn post_users_links(server : Server, m : Mux) -> Mux {
 }
 
 fn get_login(server : Server, m : Mux) -> Mux {
+
     m.handle(
-        route!(GET / "api" / "login"),
+        route!(GET / "login.html"),
         mux::new_handler()
-        .map_bind(server.clone())
-        .map(|_, server : Server| {
-            Response::new(server.render.login().into())
+        .map_tuple().amap(with_authn(server.clone()))
+        .map_tuple().map_bind(server.clone())
+        .map(|cookie : Result<(_, u32), _>, server : Server| {
+            if cookie.is_ok() {
+                http::response::Builder::new()
+                    .header(header::LOCATION, "/users/self/links.html")
+                    .status(StatusCode::SEE_OTHER)
+                    .body("redirecting".into()).unwrap()
+            } else {
+                Response::new(server.render.login().into())
+            }
+        })
+    )
+}
+
+fn get_logout(_server : Server, m : Mux) -> Mux {
+
+    m.handle(
+        route!(GET / "logout.html"),
+        mux::new_handler()
+        .map(|_| {
+            let cookie = Cookie::build(COOKIE_NAME, "<logged out>")
+                .http_only(true)
+                .same_site(cookie::SameSite::Strict)
+                .path("/")
+                .finish()
+                .to_string();
+
+            http::response::Builder::new()
+                .header(header::LOCATION, "/login.html")
+                .status(StatusCode::SEE_OTHER)
+                .header(header::SET_COOKIE, cookie)
+                .body("redirecting".into()).unwrap()
         })
     )
 }
@@ -301,7 +333,7 @@ fn post_login(server : Server, m : Mux) -> Mux {
                 .to_string();
 
             http::response::Builder::new()
-                .header(header::LOCATION, "/api/users/self/links")
+                .header(header::LOCATION, "/users/self/links.html")
                 .header(header::SET_COOKIE, cookie)
                 .status(StatusCode::SEE_OTHER)
                 .body("redirecting".into()).unwrap()
@@ -309,7 +341,7 @@ fn post_login(server : Server, m : Mux) -> Mux {
     }
 
     m.handle(
-        route!(POST / "api" / "login"),
+        route!(POST / "login.html"),
         mux::new_handler()
         .map_bind(server.clone())
         .aand_then(|req : Request, server : Server| async move {

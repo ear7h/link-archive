@@ -5,12 +5,13 @@
 		<title>links</title>
 	</head>
 	<body>
+		<a href="/logout.html">log out</a>
 		<h1>{{user.name}}'s links</h1>
 		<p>upload links</p>
 		{{ #if editor }}
 		<details>
 			<summary>add links</summary>
-			<form action="/api/users/self/links" method="post">
+			<form action="/users/self/links.html" method="post">
 				<label>links:</label>
 				</br>
 				<textarea name="links" cols=80 rows=20 wrap="soft"></textarea>
@@ -23,7 +24,9 @@
 		<table>
 		{{ #each links }}
 			<tr>
-				<td>{{ this.url }}</td>
+				<td>
+					<a href="{{ this.url }}">{{ this.url }}</a>
+				</td>
 				<td>{{ this.created }}</td>
 			</tr>
 		{{ /each }}
