@@ -8,7 +8,7 @@ fi
 latest=$(sqlite3 $1 "SELECT name FROM migrations ORDER BY name DESC LIMIT 1" || true)
 
 
-dir=$(git rev-parse --show-toplevel)/sql/migrations
+dir=$(dirname $0)/migrations
 
 for file in $(ls $dir | sort); do
 	if [ $file ">" "$latest" ]; then
