@@ -7,6 +7,10 @@ let
           if pkgs.stdenv.isDarwin
           then [ pkgs.darwin.apple_sdk.frameworks.Security ]
           else [];
+        # copy the sql migrations
+        postInstall = ''
+          cp -rP sql $out/sql
+        '';
       };
     };
   };
