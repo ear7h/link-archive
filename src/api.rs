@@ -250,7 +250,7 @@ fn post_users_links(server : Server, m : Mux) -> Mux {
             let form : PostLinksForm = serde_urlencoded::from_reader(reader)
                 .map_err(|_| Error::BadRequest)?;
 
-            for line in form.links.lines() {
+            for line in form.links.lines().filter(|l| !l.is_empty()) {
                 let u = url::Url::parse(&line)
                     .map_err(|_| Error::InvalidUrl(line.to_string()))?;
 
